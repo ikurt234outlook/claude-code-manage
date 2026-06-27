@@ -1,6 +1,6 @@
-# ccm — Claude Code 多环境管理器
+# ccm — Claude Code Manage 多环境管理器
 
-极速、安全的 Claude Code 多环境管理器。把多套 Claude Code 环境配置（不同 API/中转地址、Token、模型）**加密**保存在本地，运行时按需 **JIT 解密**并通过 `exec` 进程替换直接拉起官方 `claude`，从而在零内存驻留、完美继承官方全局 Threads 与 MCP 的前提下安全地多环境切换。
+极速、安全的 Claude Code Manage 多环境管理器。把多套 Claude Code 环境配置（不同 API/中转地址、Token、模型）**加密**保存在本地，运行时按需 **JIT 解密**并通过 `exec` 进程替换直接拉起官方 `claude`，从而在零内存驻留、完美继承官方全局 Threads 与 MCP 的前提下安全地多环境切换。
 
 > 平台：Unix（macOS / Linux）。依赖 `std::os::unix` 的权限控制与 `exec` 能力。
 
