@@ -3,6 +3,7 @@
 //! 通过 `CommandExt::exec` 让 `claude` 进程在底层覆盖当前 `ccm`，
 //! 避免 ccm 残留为父进程，并完美继承 stdin/stdout/stderr。
 
+use std::fs;
 use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -45,6 +46,34 @@ fn write_jit_settings(profile_id: &str, settings_text: &str) -> Result<PathBuf> 
     Ok(path)
 }
 
+/// 清理上次运行遗留的 JIT settings 文件，缩短明文 token 的驻留时间。
+///
+/// 仅删除 `settings/` 目录下的常规 `.json` 文件；其它文件（如 `.DS_Store`）保持不动。
+fn cleanup_stale_settings_files() -> Result<()> {
+    let dir = paths::settings_dir()?;
+    cleanup_stale_settings_files_in(&dir)
+}
+
+fn cleanup_stale_settings_files_in(dir: &Path) -> Result<()> {
+    if !dir.exists() {
+        return Ok(());
+    }
+    for entry in
+        fs::read_dir(dir).with_context(|| format!("读取运行时目录失败: {}", dir.display()))?
+    {
+        let entry = entry.with_context(|| format!("遍历运行时目录失败: {}", dir.display()))?;
+        let path = entry.path();
+        let ty = entry
+            .file_type()
+            .with_context(|| format!("读取文件类型失败: {}", path.display()))?;
+        if ty.is_file() && path.extension().is_some_and(|ext| ext == "json") {
+            fs::remove_file(&path)
+                .with_context(|| format!("删除旧 settings 文件失败: {}", path.display()))?;
+        }
+    }
+    Ok(())
+}
+
 /// 启动入口：
 /// 1. 解密 `encrypted_settings` 得到完整 settings JSON 明文
 /// 2. 原样写出 JIT settings 文件并 0600 落盘
@@ -52,6 +81,7 @@ fn write_jit_settings(profile_id: &str, settings_text: &str) -> Result<PathBuf> 
 ///
 /// `exec` 成功后**不会返回**；返回即代表错误（PATH 中无 claude 等）。
 pub fn launch(profile: &Profile, master_key: &[u8; 32]) -> Result<()> {
+    cleanup_stale_settings_files()?;
     let settings_text = crypto::decrypt(&profile.encrypted_settings, master_key)
         .context("解密 settings 失败 (master_key 可能已变更)")?;
     // 校验明文确为合法 JSON，避免把损坏内容喂给 claude。
@@ -73,6 +103,7 @@ fn exec_claude(settings_path: &Path) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::time::{SystemTime, UNIX_EPOCH};
 
     #[test]
     fn full_fields() {
@@ -97,5 +128,28 @@ mod tests {
         let v = build_settings_json("k", "https://x", "");
         assert_eq!(v["env"]["ANTHROPIC_BASE_URL"], "https://x");
         assert!(v["env"].get("ANTHROPIC_MODEL").is_none());
+    }
+
+    #[test]
+    fn cleanup_only_removes_json_files() {
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!("ccm-engine-test-{nonce}"));
+        fs::create_dir_all(&dir).unwrap();
+
+        let stale = dir.join("stale.json");
+        let keep = dir.join(".DS_Store");
+        fs::write(&stale, b"{}").unwrap();
+        fs::write(&keep, b"x").unwrap();
+
+        cleanup_stale_settings_files_in(&dir).unwrap();
+
+        assert!(!stale.exists());
+        assert!(keep.exists());
+
+        fs::remove_file(&keep).unwrap();
+        fs::remove_dir(&dir).unwrap();
     }
 }
