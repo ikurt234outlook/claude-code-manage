@@ -105,3 +105,7 @@ cargo test                              # 单元测试
 cargo clippy --all-targets -- -D warnings
 cargo build --release
 ```
+
+## License
+
+GPL-3.0-only
